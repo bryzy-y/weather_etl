@@ -6,8 +6,7 @@ dependencies = [
     "dagster",
     "dagster-cloud",
     "boto3",
-    "pandas",
-    "matplotlib",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]
