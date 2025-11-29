@@ -1,5 +1,6 @@
-from src.quickstart_etl.definitions import defs
+from src.weather_etl.definitions import defs
 
 
 def test_def_can_load():
-    assert defs.get_job_def("all_assets_job")
+    """Test that the definitions can be loaded without errors."""
+    assert defs().resolve_all_job_defs()

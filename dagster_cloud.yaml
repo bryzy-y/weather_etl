@@ -1,5 +1,5 @@
 locations:
 - code_source:
-    module_name: quickstart_etl.definitions
+    module_name: weather_etl.definitions
   location_name: weather_etl
   working_directory: ./src/
