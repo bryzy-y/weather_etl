@@ -51,7 +51,7 @@ class ForecastParams(BaseModel):
     def check_hourly_or_current(self) -> Self:
         if not self.hourly and not self.current:
             raise ValueError(
-                "At least one of 'hourly' or 'current', or 'daily' must be provided."
+                "At least one of 'hourly' or 'current' must be provided."
             )
         return self
 
