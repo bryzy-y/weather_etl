@@ -149,7 +149,7 @@ def hourly_forecast_table():
     """Hourly forecast table normalized from raw JSON data."""
     lake_path = raw_path / "hourly_forecast" / "**" / "*.parquet"
 
-    # Use Polars to scan all PARQUET files directly from S3 with glob pattern
+    # Use Polars to scan all Parquet files directly from S3 with glob pattern
     # Polars handles gzip automatically
     df = pl.read_parquet(lake_path.uri, missing_columns="insert")
 
