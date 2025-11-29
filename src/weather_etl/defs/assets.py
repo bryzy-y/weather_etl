@@ -220,7 +220,7 @@ def current_weather_table():
     base_path = raw_path / "current_weather"
     glob_pattern = f"{base_path.uri}/**/*.parquet"
 
-    # Use Polars to scan all PARQUET files directly from S3 with glob pattern
+    # Use Polars to scan all Parquet files directly from S3 with glob pattern
     df = pl.read_parquet(glob_pattern)
 
     # Normalize the nested JSON structure - flatten the 'current' struct
