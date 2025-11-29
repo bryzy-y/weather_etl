@@ -16,7 +16,6 @@ class WeatherApiClient(dg.ConfigurableResource):
     """
 
     base_url: str = API_URL
-    concurrent_requests: int = 3
 
     _client: httpx.Client = PrivateAttr()
 
