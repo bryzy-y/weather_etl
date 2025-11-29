@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Iterator, cast
 from unittest.mock import MagicMock, patch
