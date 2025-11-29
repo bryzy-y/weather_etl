@@ -273,7 +273,7 @@ def daily_hourly_forecast_schedule(context: dg.ScheduleEvaluationContext):
 
     assert end_date is not None, "End date for daily partitioning should not be None"
 
-    # current date to the last partition date (+7 days)
+    # Generate run requests for each date from the current scheduled execution date to the last available partition date.
     date_range = daily_partition.get_partition_keys_in_range(
         dg.PartitionKeyRange(start=start_date, end=end_date)
     )
