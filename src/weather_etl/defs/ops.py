@@ -58,7 +58,11 @@ def hourly_forecast_to_discord(
     forecast_lines = []
     forecast_lines.append(f"**🌤️ Weather Forecast for {city.name}**")
     forecast_lines.append(f"📅 Date: {forecast_date}")
-    forecast_lines.append(f"🌍 Location: {city.latitude}°N, {city.longitude}°W")
+    lat_hemisphere = "N" if city.latitude >= 0 else "S"
+    lon_hemisphere = "E" if city.longitude >= 0 else "W"
+    forecast_lines.append(
+        f"🌍 Location: {abs(city.latitude):.4f}°{lat_hemisphere}, {abs(city.longitude):.4f}°{lon_hemisphere}"
+    )
     forecast_lines.append("")
     forecast_lines.append("**Hourly Forecast:**")
     forecast_lines.append("```")
