@@ -17,6 +17,7 @@ dev = [
     "boto3-stubs[s3]>=1.41.5",
     "dagster-dg-cli>=1.11.11",
     "dagster-webserver",
+    "pre-commit>=4.5.0",
     "pytest",
 ]
 

@@ -1,14 +1,17 @@
 from datetime import date
-from pydantic import BaseModel, model_validator
 from enum import StrEnum
 from typing import Self
 
+from pydantic import BaseModel, model_validator
+
 API_URL = "https://api.open-meteo.com/v1"
+
 
 class City(BaseModel):
     name: str
     latitude: float
     longitude: float
+
 
 CITIES = {
     "NYC": City(name="New York City", latitude=40.7128, longitude=-74.0060),
@@ -16,6 +19,7 @@ CITIES = {
     "CHI": City(name="Chicago", latitude=41.8781, longitude=-87.6298),
     "DC": City(name="Washington DC", latitude=38.9072, longitude=-77.0369),
 }
+
 
 class WeatherVars(StrEnum):
     TEMPERATURE_2M = "temperature_2m"
@@ -28,10 +32,9 @@ class WeatherVars(StrEnum):
     VISIBILITY = "visibility"
 
     @classmethod
-    def default(cls) -> list['WeatherVars']:
-        return [
-            member for member in WeatherVars 
-        ]
+    def default(cls) -> list["WeatherVars"]:
+        return [member for member in WeatherVars]
+
 
 class ForecastParams(BaseModel):
     city: City
@@ -41,13 +44,15 @@ class ForecastParams(BaseModel):
     windspeed_unit: str = "kmh"
     precipitation_unit: str = "mm"
     timezone: str = "auto"
-    hourly: list['WeatherVars'] | None = None
-    current: list['WeatherVars'] | None = None
+    hourly: list["WeatherVars"] | None = None
+    current: list["WeatherVars"] | None = None
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def check_hourly_or_current(self) -> Self:
         if not self.hourly and not self.current:
-            raise ValueError("At least one of 'hourly' or 'current', or 'daily' must be provided.")
+            raise ValueError(
+                "At least one of 'hourly' or 'current', or 'daily' must be provided."
+            )
         return self
 
     def to_query_params(self) -> dict[str, str]:

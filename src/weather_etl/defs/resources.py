@@ -1,10 +1,13 @@
-import httpx
-import dagster as dg
+from contextlib import contextmanager
 from datetime import date
+
+import dagster as dg
+import httpx
 from dagster_aws.s3 import S3Resource
 from pydantic import PrivateAttr
-from weather_etl.models import City, ForecastParams, WeatherVars, API_URL
-from contextlib import contextmanager
+
+from weather_etl.models import API_URL, City, ForecastParams, WeatherVars
+
 
 class WeatherApiClient(dg.ConfigurableResource):
     """A simple client for the Open-Meteo weather API.
@@ -25,31 +28,25 @@ class WeatherApiClient(dg.ConfigurableResource):
             yield self
         finally:
             self._client.close()
-    
-    
+
     def hourly_forecast(self, city: City, start_date: date, end_date: date) -> dict:
         params = ForecastParams(
             city=city,
             start_date=start_date,
             end_date=end_date,
-            hourly=WeatherVars.default()
+            hourly=WeatherVars.default(),
         )
 
         response = self._client.get("forecast", params=params.to_query_params())
         response.raise_for_status()
         return response.json()
-
 
     def current_weather(self, city: City) -> dict:
-        params = ForecastParams(
-            city=city, 
-            current=WeatherVars.default()
-        )
+        params = ForecastParams(city=city, current=WeatherVars.default())
 
         response = self._client.get("forecast", params=params.to_query_params())
         response.raise_for_status()
         return response.json()
-
 
 
 @dg.definitions
@@ -61,6 +58,6 @@ def resources():
                 aws_access_key_id=dg.EnvVar("AWS_ACCESS_KEY_ID"),
                 aws_secret_access_key=dg.EnvVar("AWS_SECRET_ACCESS_KEY"),
                 region_name=dg.EnvVar("AWS_REGION"),
-            )
+            ),
         }
     )
