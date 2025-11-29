@@ -198,3 +198,6 @@ exponent.txt
 
 # Temporary files
 .tmp*
+
+# VS Code settings
+.vscode/

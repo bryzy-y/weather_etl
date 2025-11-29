@@ -145,7 +145,7 @@ def raw_current_weather(
     deps=[raw_hourly_forecast],
     automation_condition=dg.AutomationCondition.eager(),
 )
-def hourly_forecast_table(context: AssetExecutionContext):
+def hourly_forecast_table():
     """Hourly forecast table normalized from raw JSON data."""
     lake_path = raw_path / "hourly_forecast" / "**" / "*.parquet"
 
@@ -215,7 +215,7 @@ def hourly_forecast_table(context: AssetExecutionContext):
     deps=[raw_current_weather],
     automation_condition=dg.AutomationCondition.eager(),
 )
-def current_weather_table(context: AssetExecutionContext):
+def current_weather_table():
     """Current weather table normalized from raw JSON data."""
     base_path = raw_path / "current_weather"
     glob_pattern = f"{base_path.uri}/**/*.parquet"
@@ -231,7 +231,6 @@ def current_weather_table(context: AssetExecutionContext):
             pl.col("longitude"),
             pl.col("timezone"),
             pl.col("elevation"),
-            pl.col("city_code"),
             pl.col("current").struct.field("time").alias("time"),
             pl.col("current").struct.field("interval").alias("interval"),
             pl.col("current").struct.field("temperature_2m").alias("temperature_2m"),

@@ -22,10 +22,6 @@ def hourly_forecast_to_discord(
 ) -> dict:
     """Send hourly weather forecast to a Discord channel via webhook.
 
-    Args:
-        context: Dagster operation execution context
-        discord_webhook_url: Discord webhook URL for the target channel
-
     Returns:
         dict: Response from Discord webhook
     """
