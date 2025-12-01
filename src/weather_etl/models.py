@@ -1,3 +1,5 @@
+"""Module defining models for the weather ETL pipeline."""
+
 from datetime import date
 from enum import StrEnum
 from typing import Self
@@ -10,6 +12,8 @@ ARCHIVE_API_URL = "https://archive-api.open-meteo.com/v1"
 
 
 class City(BaseModel):
+    """Represents a city with its name and geographical coordinates."""
+
     name: str
     latitude: float
     longitude: float
@@ -24,6 +28,8 @@ CITIES = {
 
 
 class WeatherVars(StrEnum):
+    """Enumeration of weather variables available from the API."""
+
     TEMPERATURE_2M = "temperature_2m"
     PRECIPITATION = "precipitation"
     WINDSPEED_10M = "windspeed_10m"
@@ -39,6 +45,8 @@ class WeatherVars(StrEnum):
 
 
 class ForecastParams(BaseModel):
+    """Parameters for querying the weather forecast API."""
+
     cities: list[City]
     start_date: date | None = None
     end_date: date | None = None
@@ -56,6 +64,7 @@ class ForecastParams(BaseModel):
         return self
 
     def to_query_params(self) -> dict[str, str]:
+        """Convert the forecast parameters to a dictionary suitable for API query parameters."""
         params: dict[str, str] = {
             "latitude": ",".join(str(city.latitude) for city in self.cities),
             "longitude": ",".join(str(city.longitude) for city in self.cities),

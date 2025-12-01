@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from typing import TYPE_CHECKING
 
@@ -21,19 +21,23 @@ if TYPE_CHECKING:
 
 
 def polars_to_s3(df: pl.DataFrame, lake_path: LakePath, s3_client: "S3Client"):
-    """Helper function to write a Polars DataFrame to S3 as a Parquet file."""
+    """
+    Helper function to write a Polars DataFrame to S3 as a Parquet file.
+    Args:
+        df (pl.DataFrame): The Polars DataFrame to write.
+        lake_path (LakePath): The target LakePath in S3.
+        s3_client (S3Client): The Boto3 S3 client to use for uploading.
+    """
     with BytesIO() as byte_stream:
         df.write_parquet(byte_stream)
         byte_stream.seek(0)
 
-        s3_client.put_object(
-            Bucket=lake_path.bucket, Key=lake_path.key, Body=byte_stream
-        )
+        s3_client.put_object(Bucket=lake_path.bucket, Key=lake_path.key, Body=byte_stream)
 
 
 monthly_partition = dg.MonthlyPartitionsDefinition(
     # Backfill the data from Jan 2023 onwards
-    start_date=datetime(2023, 1, 1, tzinfo=timezone.utc),
+    start_date=datetime(2023, 1, 1, tzinfo=UTC),
 )
 
 
@@ -49,11 +53,9 @@ monthly_partition = dg.MonthlyPartitionsDefinition(
     kinds={"s3"},
     partitions_def=monthly_partition,
 )
-def historical_forecast(
-    context: AssetExecutionContext, weather_api_client: WeatherApiClient, s3: S3Resource
-):
+def historical_forecast(context: AssetExecutionContext, weather_api_client: WeatherApiClient, s3: S3Resource):
     """Fetches historical forecast data from the weather API."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     start_month = datetime.strptime(context.partition_key, monthly_partition.fmt).date()
     end_month = (start_month + timedelta(days=32)).replace(day=1) - timedelta(days=1)
 
@@ -61,9 +63,7 @@ def historical_forecast(
     if now.date() < end_month:
         end_month = now.date()
 
-    data = weather_api_client.historical_forecast(
-        list(CITIES.values()), start_month, end_month
-    )
+    data = weather_api_client.historical_forecast(list(CITIES.values()), start_month, end_month)
 
     timestamp = now.strftime("%Y%m%dT%H%M%S")
     lake_path = forecast_path(start_month) / f"hourly_forecast_{timestamp}.parquet"
@@ -93,17 +93,13 @@ def historical_forecast(
         "endpoint": "/forecast",
     },
     kinds={"s3"},
-    automation_condition=dg.AutomationCondition.on_cron(
-        "0 6 * * *"
-    ),  # Daily at 6 AM UTC
+    automation_condition=dg.AutomationCondition.on_cron("0 6 * * *"),  # Daily at 6 AM UTC
 )
 def hourly_forecast(weather_api_client: WeatherApiClient, s3: S3Resource):
     """Fetches hourly forecast data from the weather API for the next 7 days."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     timestamp = now.strftime("%Y%m%dT%H%M%S")
-    lake_path = (
-        forecast_path(now.replace(day=1)) / f"hourly_forecast_{timestamp}.parquet"
-    )
+    lake_path = forecast_path(now.replace(day=1)) / f"hourly_forecast_{timestamp}.parquet"
 
     data = weather_api_client.hourly_forecast(list(CITIES.values()))
 
@@ -138,7 +134,7 @@ def historical_actual_weather(
     context: AssetExecutionContext, weather_api_client: WeatherApiClient, s3: S3Resource
 ):
     """Historical actual observed weather data from the archive API."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     start_month = datetime.strptime(context.partition_key, monthly_partition.fmt).date()
     end_month = (start_month + timedelta(days=32)).replace(day=1) - timedelta(days=1)
 
@@ -147,9 +143,7 @@ def historical_actual_weather(
     if end_month > max_date:
         end_month = max_date
 
-    data = weather_api_client.actual_weather(
-        list(CITIES.values()), start_month, end_month
-    )
+    data = weather_api_client.actual_weather(list(CITIES.values()), start_month, end_month)
 
     timestamp = now.strftime("%Y%m%dT%H%M%S")
     lake_path = actual_weather_path(start_month) / f"actual_weather_{timestamp}.parquet"
@@ -179,23 +173,18 @@ def historical_actual_weather(
         "endpoint": "/archive",
     },
     kinds={"s3"},
-    automation_condition=dg.AutomationCondition.on_cron(
-        "0 3 */5 * *"
-    ),  # Every 5 days at 3 AM UTC
+    automation_condition=dg.AutomationCondition.on_cron("0 3 */5 * *"),  # Every 5 days at 3 AM UTC
 )
 def actual_weather(weather_api_client: WeatherApiClient, s3: S3Resource):
     """Actual observed weather data for the last available period (5 days ago) from the archive API."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     start = (now - timedelta(days=10)).date()
     end = (now - timedelta(days=5)).date()  # Archive API has 5-day delay
 
     data = weather_api_client.actual_weather(list(CITIES.values()), start, end)
     timestamp = now.strftime("%Y%m%dT%H%M%S")
-    lake_path = (
-        actual_weather_path(start.replace(day=1))
-        / f"actual_weather_{timestamp}.parquet"
-    )
+    lake_path = actual_weather_path(start.replace(day=1)) / f"actual_weather_{timestamp}.parquet"
 
     # Add metadata fields
     df = pl.from_dicts(data)
@@ -277,9 +266,9 @@ def transform_weather_data(df: pl.DataFrame) -> pl.DataFrame:
     )
 
     # Join to add city_code based on rounded lat/lon
-    df = df.join(
-        city_mapping, on=["latitude_rounded", "longitude_rounded"], how="left"
-    ).drop(["latitude_rounded", "longitude_rounded"])
+    df = df.join(city_mapping, on=["latitude_rounded", "longitude_rounded"], how="left").drop(
+        ["latitude_rounded", "longitude_rounded"]
+    )
 
     # Reorder columns
     df = df.select(
@@ -320,17 +309,13 @@ def hourly_forecast_table():
     """Hourly forecast table normalized from raw JSON data."""
     path = forecast_path(date=None) / "**" / "*.parquet"
 
-    df = pl.read_parquet(path.uri, missing_columns="insert").pipe(
-        transform_weather_data
-    )
+    df = pl.read_parquet(path.uri, missing_columns="insert").pipe(transform_weather_data)
     # Load back to S3 as a single Parquet file
     output_lake_path = staged_path / "hourly_forecast_table.parquet"
     df.write_parquet(output_lake_path.uri)
 
     # Prepare metadata
-    columns = [
-        dg.TableColumn(name=col, type=str(dtype)) for (col, dtype) in df.schema.items()
-    ]
+    columns = [dg.TableColumn(name=col, type=str(dtype)) for (col, dtype) in df.schema.items()]
 
     return dg.MaterializeResult(
         metadata={
@@ -353,18 +338,14 @@ def actual_weather_table():
     actual_path = forecast_path(date=None) / "**" / "*.parquet"
 
     # Use Polars to scan all Parquet files directly from S3 with glob pattern
-    df = pl.read_parquet(actual_path.uri, missing_columns="insert").pipe(
-        transform_weather_data
-    )
+    df = pl.read_parquet(actual_path.uri, missing_columns="insert").pipe(transform_weather_data)
 
     # Load back to S3 as a single Parquet file
     output_lake_path = staged_path / "actual_weather_table.parquet"
     df.write_parquet(output_lake_path.uri)
 
     # Prepare metadata
-    columns = [
-        dg.TableColumn(name=col, type=str(dtype)) for (col, dtype) in df.schema.items()
-    ]
+    columns = [dg.TableColumn(name=col, type=str(dtype)) for (col, dtype) in df.schema.items()]
 
     return dg.MaterializeResult(
         metadata={

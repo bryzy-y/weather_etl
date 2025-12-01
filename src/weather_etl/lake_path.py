@@ -1,4 +1,6 @@
-from datetime import date, datetime
+"""Module defining LakePath for S3 path management in the weather ETL pipeline."""
+
+from datetime import date
 from pathlib import PurePosixPath
 from typing import Self
 
@@ -136,24 +138,20 @@ staged_path = LakePath("dagster-weather-etl", "staged")
 
 
 def forecast_path(date: date | None) -> LakePath:
-    """Get the LakePath for historical forecast data for a given date.
-
+    """
+    Get the LakePath for forecast data for a given date.
     Args:
-        date_str: Date string in 'YYYYMMDD' format
-    Returns:
-        LakePath for the historical forecast data
+        date | None: Date of the forecast data
     """
     path = raw_path / "dataset=hourly_forecast"
     return path / f"date={date.strftime('%Y-%m-%d')}" if date else path
 
 
 def actual_weather_path(date: date | None) -> LakePath:
-    """Get the LakePath for actual weather data for a given date.
-
+    """
+    Get the LakePath for actual weather data for a given date.
     Args:
-        date: Date of
-    Returns:
-        LakePath for the actual weather data
+        date | None: Date of the actual weather data
     """
     path = raw_path / "dataset=actual_weather"
     return path / f"date={date.strftime('%Y-%m-%d')}" if date else path

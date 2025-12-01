@@ -35,3 +35,34 @@ directory_type = "project"
 
 [tool.dg.project]
 root_module = "weather_etl"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 115
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "UP", # pyupgrade
+]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"] # Allow unused imports in __init__.py
+
+[tool.interrogate]
+ignore-init-method = true
+ignore-init-module = false
+ignore-magic = false
+ignore-semiprivate = false
+ignore-private = false
+ignore-property-decorators = false
+ignore-module = false
+ignore-nested-functions = false
+ignore-nested-classes = true
+fail-under = 80
+exclude = ["tests", "__pycache__", ".venv", "__init__.py"]
+verbose = 1

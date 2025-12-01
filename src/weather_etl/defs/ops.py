@@ -36,14 +36,10 @@ def hourly_forecast_to_discord(
     df = pl.read_parquet(table_path.uri)
 
     # Filter for specific city and date
-    df = df.filter(
-        (pl.col("city_code") == city_code) & (pl.col("time").dt.date() == forecast_date)
-    ).sort("time")
+    df = df.filter((pl.col("city_code") == city_code) & (pl.col("time").dt.date() == forecast_date)).sort("time")
 
     if df.height == 0:
-        context.log.warning(
-            f"No forecast data found for {city.name} on {forecast_date}"
-        )
+        context.log.warning(f"No forecast data found for {city.name} on {forecast_date}")
 
     # Extract hourly data
     times = df["time"].to_list()
@@ -67,11 +63,7 @@ def hourly_forecast_to_discord(
     forecast_lines.append("-" * 40)
 
     for i in range(len(times)):  # Show every hour
-        time_str = (
-            times[i].strftime("%H:%M")
-            if hasattr(times[i], "strftime")
-            else str(times[i])[-5:]
-        )
+        time_str = times[i].strftime("%H:%M") if hasattr(times[i], "strftime") else str(times[i])[-5:]
         temp = f"{temps[i]:.1f}°C" if i < len(temps) else "N/A"
         rain = f"{precip[i]:.1f}mm" if i < len(precip) else "N/A"
         wind_speed = f"{wind[i]:.1f}km/h" if i < len(wind) else "N/A"
@@ -90,13 +82,7 @@ def hourly_forecast_to_discord(
 
 
 @dg.job(
-    config=dg.RunConfig(
-        ops={
-            "hourly_forecast_to_discord": DiscordWebhook(
-                url=dg.EnvVar("DISCORD_WEBHOOK_URL")
-            )
-        }
-    )
+    config=dg.RunConfig(ops={"hourly_forecast_to_discord": DiscordWebhook(url=dg.EnvVar("DISCORD_WEBHOOK_URL"))})
 )
 def hourly_forecast_to_discord_job() -> None:
     """Send a message to a Discord channel via webhook."""

@@ -41,9 +41,7 @@ def test_transform_weather_data(sample_file: str):
         "extracted_at",
     ]
 
-    assert set(transformed_df.columns) == set(
-        expected_columns
-    ), f"Columns mismatch. Got: {transformed_df.columns}"
+    assert set(transformed_df.columns) == set(expected_columns), f"Columns mismatch. Got: {transformed_df.columns}"
     assert transformed_df.height > 0, "DataFrame should have rows"
 
     # Check data types
@@ -54,9 +52,7 @@ def test_transform_weather_data(sample_file: str):
     assert transformed_df["city_code"].dtype == pl.String
 
     # Verify city_code is properly assigned
-    assert (
-        transformed_df["city_code"].null_count() == 0
-    ), "All rows should have a city_code"
+    assert transformed_df["city_code"].null_count() == 0, "All rows should have a city_code"
     # Verify we have valid city codes
     valid_cities = {"NYC", "PHIL", "CHI", "DC"}
     assert transformed_df["city_code"].unique().to_list()[0] in valid_cities
