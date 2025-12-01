@@ -1,7 +1,6 @@
-import itertools
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import dagster as dg
 import polars as pl
@@ -9,26 +8,36 @@ from dagster import AssetExecutionContext, MetadataValue, RetryPolicy, asset
 from dagster_aws.s3 import S3Resource
 
 from weather_etl.defs.resources import WeatherApiClient
-from weather_etl.lake_path import raw_path, staged_path
-from weather_etl.models import API_URL, CITIES
+from weather_etl.lake_path import (
+    LakePath,
+    actual_weather_path,
+    forecast_path,
+    staged_path,
+)
+from weather_etl.models import API_URL, ARCHIVE_API_URL, CITIES, HISTORICAL_API_URL
 
 if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
 
 
-daily_partition = dg.DailyPartitionsDefinition(
-    # We want to backfill the last 60 days of data at most
-    start_date=datetime.now(timezone.utc) - timedelta(days=60),
-    end_offset=8,  # Allow scheduling up to 7 days in the future
-)
-# Static partitioning by region code
-city_partition = dg.StaticPartitionsDefinition(list(CITIES.keys()))
-# Combine both partitioning schemes for the forecast assets
-multi_partitions = dg.MultiPartitionsDefinition(
-    {
-        "date": daily_partition,
-        "city": city_partition,
-    }
+def polars_to_s3(df: pl.DataFrame, lake_path: LakePath, s3_client: "S3Client"):
+    """
+    Helper function to write a Polars DataFrame to S3 as a Parquet file.
+    Args:
+        df (pl.DataFrame): The Polars DataFrame to write.
+        lake_path (LakePath): The target LakePath in S3.
+        s3_client (S3Client): The Boto3 S3 client to use for uploading.
+    """
+    with BytesIO() as byte_stream:
+        df.write_parquet(byte_stream)
+        byte_stream.seek(0)
+
+        s3_client.put_object(Bucket=lake_path.bucket, Key=lake_path.key, Body=byte_stream)
+
+
+monthly_partition = dg.MonthlyPartitionsDefinition(
+    # Backfill the data from Jan 2023 onwards
+    start_date=datetime(2023, 1, 1, tzinfo=UTC),
 )
 
 
@@ -36,57 +45,40 @@ multi_partitions = dg.MultiPartitionsDefinition(
     key_prefix=["raw"],
     retry_policy=RetryPolicy(max_retries=3, delay=10),
     group_name="weather_etl",
-    partitions_def=multi_partitions,
     metadata={
         "owner": "ybryz",
-        "endpoint": MetadataValue.url(API_URL + "/forecast"),
+        "api-url": MetadataValue.url(HISTORICAL_API_URL),
+        "endpoint": "/forecast",
     },
     kinds={"s3"},
+    partitions_def=monthly_partition,
 )
-def raw_hourly_forecast(
-    context: AssetExecutionContext, weather_api_client: WeatherApiClient, s3: S3Resource
-):
-    """Fetches hourly forecast data from the weather API."""
-    key = cast(dg.MultiPartitionKey, context.partition_key)
+def historical_forecast(context: AssetExecutionContext, weather_api_client: WeatherApiClient, s3: S3Resource):
+    """Fetches historical forecast data from the weather API."""
+    now = datetime.now(UTC)
+    start_month = datetime.strptime(context.partition_key, monthly_partition.fmt).date()
+    end_month = (start_month + timedelta(days=32)).replace(day=1) - timedelta(days=1)
 
-    # Get partition dims
-    date_dim = key.keys_by_dimension["date"]
-    city_dim = key.keys_by_dimension["city"]
+    # Fill in the end_month to not exceed today's date
+    if now.date() < end_month:
+        end_month = now.date()
 
-    dt = datetime.strptime(date_dim, "%Y-%m-%d").date()
-    city = CITIES[city_dim]
+    data = weather_api_client.historical_forecast(list(CITIES.values()), start_month, end_month)
 
-    data = weather_api_client.hourly_forecast(city=city, start_date=dt, end_date=dt)
-
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    lake_path = (
-        raw_path
-        / "hourly_forecast"
-        / city_dim
-        / date_dim
-        / f"hourly_forecast_{timestamp}.parquet"
-    )
+    timestamp = now.strftime("%Y%m%dT%H%M%S")
+    lake_path = forecast_path(start_month) / f"hourly_forecast_{timestamp}.parquet"
 
     # Add metadata fields
-    data["forecast_timestamp"] = timestamp
-    data["city_code"] = city_dim
+    df = pl.from_dicts(data)
+    df = df.with_columns(pl.lit(timestamp).alias("extracted_at"))
 
-    # Prepare S3 client
-    s3_client: S3Client = s3.get_client()
-
-    # Compress data and upload to S3
-    with BytesIO() as byte_stream:
-        df = pl.from_dict(data)
-        df.write_parquet(byte_stream)
-        byte_stream.seek(0)
-
-        s3_client.put_object(
-            Bucket=lake_path.bucket, Key=lake_path.key, Body=byte_stream
-        )
+    # Upload data to S3
+    polars_to_s3(df, lake_path, s3.get_client())
 
     return dg.MaterializeResult(
         metadata={
-            "uri": MetadataValue.text(lake_path.uri),
+            "uri": MetadataValue.url(lake_path.uri),
+            "cities": MetadataValue.json(list(CITIES.keys())),
         }
     )
 
@@ -95,86 +87,197 @@ def raw_hourly_forecast(
     key_prefix=["raw"],
     retry_policy=RetryPolicy(max_retries=3, delay=10),
     group_name="weather_etl",
-    partitions_def=city_partition,
     metadata={
         "owner": "ybryz",
-        "endpoint": MetadataValue.url(API_URL + "/forecast"),
+        "api-url": MetadataValue.url(API_URL),
+        "endpoint": "/forecast",
     },
-    automation_condition=dg.AutomationCondition.on_cron("@hourly"),
     kinds={"s3"},
+    automation_condition=dg.AutomationCondition.on_cron("0 6 * * *"),  # Daily at 6 AM UTC
 )
-def raw_current_weather(
-    context: AssetExecutionContext, weather_api_client: WeatherApiClient, s3: S3Resource
-):
-    """Fetches current weather data from the weather API."""
-    city = CITIES[context.partition_key]
-    data = weather_api_client.current_weather(city)
+def hourly_forecast(weather_api_client: WeatherApiClient, s3: S3Resource):
+    """Fetches hourly forecast data from the weather API for the next 7 days."""
+    now = datetime.now(UTC)
+    timestamp = now.strftime("%Y%m%dT%H%M%S")
+    lake_path = forecast_path(now.replace(day=1)) / f"hourly_forecast_{timestamp}.parquet"
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    lake_path = (
-        raw_path
-        / "current_weather"
-        / context.partition_key
-        / f"current_weather_{timestamp}.parquet"
-    )
+    data = weather_api_client.hourly_forecast(list(CITIES.values()))
 
     # Add metadata fields
-    data["city_code"] = context.partition_key
+    df = pl.from_dicts(data)
+    df = df.with_columns(pl.lit(timestamp).alias("extracted_at"))
 
-    s3_client: S3Client = s3.get_client()
-    with BytesIO() as byte_stream:
-        df = pl.from_dict(data)
-        df.write_parquet(byte_stream)
-        byte_stream.seek(0)
-
-        s3_client.put_object(
-            Bucket=lake_path.bucket, Key=lake_path.key, Body=byte_stream
-        )
+    # Upload data to S3
+    polars_to_s3(df, lake_path, s3.get_client())
 
     return dg.MaterializeResult(
         metadata={
-            "uri": MetadataValue.text(lake_path.uri),
+            "cities": MetadataValue.json(list(CITIES.keys())),
+            "s3_path": MetadataValue.url(lake_path.uri),
         }
     )
 
 
 @asset(
-    key_prefix=["staged"],
+    key_prefix=["raw"],
+    retry_policy=RetryPolicy(max_retries=3, delay=10),
     group_name="weather_etl",
-    kinds={"polars"},
-    deps=[raw_hourly_forecast],
-    automation_condition=dg.AutomationCondition.eager(),
+    metadata={
+        "owner": "ybryz",
+        "api-url": MetadataValue.url(ARCHIVE_API_URL),
+        "endpoint": "/archive",
+    },
+    kinds={"s3"},
+    partitions_def=monthly_partition,
 )
-def hourly_forecast_table():
-    """Hourly forecast table normalized from raw JSON data."""
-    lake_path = raw_path / "hourly_forecast" / "**" / "*.parquet"
+def historical_actual_weather(
+    context: AssetExecutionContext, weather_api_client: WeatherApiClient, s3: S3Resource
+):
+    """Historical actual observed weather data from the archive API."""
+    now = datetime.now(UTC)
+    start_month = datetime.strptime(context.partition_key, monthly_partition.fmt).date()
+    end_month = (start_month + timedelta(days=32)).replace(day=1) - timedelta(days=1)
 
-    # Use Polars to scan all Parquet files directly from S3 with glob pattern
-    # Polars handles gzip automatically
-    df = pl.read_parquet(lake_path.uri, missing_columns="insert")
+    # Fill in the end_month to not exceed 5 days ago (archive API has 5-day delay)
+    max_date = (now - timedelta(days=5)).date()
+    if end_month > max_date:
+        end_month = max_date
 
+    data = weather_api_client.actual_weather(list(CITIES.values()), start_month, end_month)
+
+    timestamp = now.strftime("%Y%m%dT%H%M%S")
+    lake_path = actual_weather_path(start_month) / f"actual_weather_{timestamp}.parquet"
+
+    # Add metadata fields
+    df = pl.from_dicts(data)
+    df = df.with_columns(pl.lit(timestamp).alias("extracted_at"))
+
+    # Upload data to S3
+    polars_to_s3(df, lake_path, s3.get_client())
+
+    return dg.MaterializeResult(
+        metadata={
+            "cities": MetadataValue.json(list(CITIES.keys())),
+            "s3_path": MetadataValue.url(lake_path.uri),
+        }
+    )
+
+
+@asset(
+    key_prefix=["raw"],
+    retry_policy=RetryPolicy(max_retries=3, delay=10),
+    group_name="weather_etl",
+    metadata={
+        "owner": "ybryz",
+        "api-url": MetadataValue.url(ARCHIVE_API_URL),
+        "endpoint": "/archive",
+    },
+    kinds={"s3"},
+    automation_condition=dg.AutomationCondition.on_cron("0 3 */5 * *"),  # Every 5 days at 3 AM UTC
+)
+def actual_weather(weather_api_client: WeatherApiClient, s3: S3Resource):
+    """Actual observed weather data for the last available period (5 days ago) from the archive API."""
+    now = datetime.now(UTC)
+
+    start = (now - timedelta(days=10)).date()
+    end = (now - timedelta(days=5)).date()  # Archive API has 5-day delay
+
+    data = weather_api_client.actual_weather(list(CITIES.values()), start, end)
+    timestamp = now.strftime("%Y%m%dT%H%M%S")
+    lake_path = actual_weather_path(start.replace(day=1)) / f"actual_weather_{timestamp}.parquet"
+
+    # Add metadata fields
+    df = pl.from_dicts(data)
+    df = df.with_columns(pl.lit(timestamp).alias("extracted_at"))
+
+    # Upload data to S3
+    polars_to_s3(df, lake_path, s3.get_client())
+
+    return dg.MaterializeResult(
+        metadata={
+            "cities": MetadataValue.json(list(CITIES.keys())),
+            "uri": MetadataValue.url(lake_path.uri),
+            "start_date": MetadataValue.text(str(start)),
+            "end_date": MetadataValue.text(str(end)),
+        }
+    )
+
+
+def transform_weather_data(df: pl.DataFrame) -> pl.DataFrame:
+    """Common transformation logic for weather data normalization."""
     # Normalize the nested JSON structure
     # Explode the hourly arrays into separate rows
+    df = (
+        df.select(
+            [
+                pl.col("latitude"),
+                pl.col("longitude"),
+                pl.col("timezone"),
+                pl.col("elevation"),
+                pl.col("hourly").struct.field("time").alias("time"),
+                pl.col("hourly").struct.field("temperature_2m").alias("temperature_2m"),
+                pl.col("hourly").struct.field("precipitation").alias("precipitation"),
+                pl.col("hourly").struct.field("windspeed_10m").alias("windspeed_10m"),
+                pl.col("hourly").struct.field("snowfall").alias("snowfall"),
+                pl.col("hourly").struct.field("rain").alias("rain"),
+                pl.col("hourly").struct.field("showers").alias("showers"),
+                pl.col("hourly").struct.field("snow_depth").alias("snow_depth"),
+                pl.col("hourly").struct.field("visibility").alias("visibility"),
+                pl.col("extracted_at"),
+            ]
+        )
+        .explode(
+            [
+                "time",
+                "temperature_2m",
+                "precipitation",
+                "windspeed_10m",
+                "snowfall",
+                "rain",
+                "showers",
+                "snow_depth",
+                "visibility",
+            ]
+        )
+        .with_columns(
+            pl.col("time").str.strptime(pl.Datetime, "%Y-%m-%dT%H:%M"),
+        )
+    )
+
+    # Create a mapping dataframe from lat/lon to city_code
+    # Round coordinates to nearest integer for fuzzy matching (city-level granularity)
+    city_mapping = pl.DataFrame(
+        [
+            {
+                "latitude_rounded": round(city.latitude, 0),
+                "longitude_rounded": round(city.longitude, 0),
+                "city_code": code,
+            }
+            for code, city in CITIES.items()
+        ]
+    )
+
+    # Round coordinates in the data for joining
+    df = df.with_columns(
+        [
+            pl.col("latitude").round(0).alias("latitude_rounded"),
+            pl.col("longitude").round(0).alias("longitude_rounded"),
+        ]
+    )
+
+    # Join to add city_code based on rounded lat/lon
+    df = df.join(city_mapping, on=["latitude_rounded", "longitude_rounded"], how="left").drop(
+        ["latitude_rounded", "longitude_rounded"]
+    )
+
+    # Reorder columns
     df = df.select(
         [
-            pl.col("city_code"),
-            pl.col("forecast_timestamp"),
-            pl.col("latitude"),
-            pl.col("longitude"),
-            pl.col("timezone"),
-            pl.col("elevation"),
-            pl.col("hourly").struct.field("time").alias("time"),
-            pl.col("hourly").struct.field("temperature_2m").alias("temperature_2m"),
-            pl.col("hourly").struct.field("precipitation").alias("precipitation"),
-            pl.col("hourly").struct.field("windspeed_10m").alias("windspeed_10m"),
-            pl.col("hourly").struct.field("snowfall").alias("snowfall"),
-            pl.col("hourly").struct.field("rain").alias("rain"),
-            pl.col("hourly").struct.field("showers").alias("showers"),
-            pl.col("hourly").struct.field("snow_depth").alias("snow_depth"),
-            pl.col("hourly").struct.field("visibility").alias("visibility"),
-        ]
-    ).explode(
-        [
+            "city_code",
+            "latitude",
+            "longitude",
+            "timezone",
+            "elevation",
             "time",
             "temperature_2m",
             "precipitation",
@@ -184,24 +287,38 @@ def hourly_forecast_table():
             "showers",
             "snow_depth",
             "visibility",
+            "extracted_at",
         ]
     )
 
-    # Convert time column to datetime
-    df = df.with_columns([pl.col("time").str.strptime(pl.Datetime, "%Y-%m-%dT%H:%M")])
+    # Dedup based on city_code and time, keeping the latest extracted_at
+    df = df.sort(["city_code", "time", "extracted_at"], descending=[False, False, True])
+    df = df.unique(subset=["city_code", "time"], keep="first")
 
+    return df
+
+
+@asset(
+    key_prefix=["staged"],
+    group_name="weather_etl",
+    kinds={"polars"},
+    deps=[historical_forecast, hourly_forecast],
+    automation_condition=dg.AutomationCondition.eager(),
+)
+def hourly_forecast_table():
+    """Hourly forecast table normalized from raw JSON data."""
+    path = forecast_path(date=None) / "**" / "*.parquet"
+
+    df = pl.read_parquet(path.uri, missing_columns="insert").pipe(transform_weather_data)
     # Load back to S3 as a single Parquet file
     output_lake_path = staged_path / "hourly_forecast_table.parquet"
     df.write_parquet(output_lake_path.uri)
 
     # Prepare metadata
-    columns = [
-        dg.TableColumn(name=col, type=str(dtype)) for (col, dtype) in df.schema.items()
-    ]
+    columns = [dg.TableColumn(name=col, type=str(dtype)) for (col, dtype) in df.schema.items()]
 
     return dg.MaterializeResult(
         metadata={
-            "uri": dg.MetadataValue.url(output_lake_path.uri),
             "column_schema": dg.TableSchema(columns=columns),
             "row_count": MetadataValue.int(df.height),
         }
@@ -212,76 +329,27 @@ def hourly_forecast_table():
     key_prefix=["staged"],
     group_name="weather_etl",
     kinds={"polars"},
-    deps=[raw_current_weather],
+    deps=[historical_actual_weather, actual_weather],
     automation_condition=dg.AutomationCondition.eager(),
 )
-def current_weather_table():
-    """Current weather table normalized from raw JSON data."""
-    base_path = raw_path / "current_weather"
-    glob_pattern = f"{base_path.uri}/**/*.parquet"
+def actual_weather_table():
+    """Actual weather table normalized from raw JSON data."""
+
+    actual_path = forecast_path(date=None) / "**" / "*.parquet"
 
     # Use Polars to scan all Parquet files directly from S3 with glob pattern
-    df = pl.read_parquet(glob_pattern)
+    df = pl.read_parquet(actual_path.uri, missing_columns="insert").pipe(transform_weather_data)
 
-    # Normalize the nested JSON structure - flatten the 'current' struct
-    df = df.select(
-        [
-            pl.col("city_code"),
-            pl.col("latitude"),
-            pl.col("longitude"),
-            pl.col("timezone"),
-            pl.col("elevation"),
-            pl.col("current").struct.field("time").alias("time"),
-            pl.col("current").struct.field("interval").alias("interval"),
-            pl.col("current").struct.field("temperature_2m").alias("temperature_2m"),
-            pl.col("current").struct.field("precipitation").alias("precipitation"),
-            pl.col("current").struct.field("windspeed_10m").alias("windspeed_10m"),
-            pl.col("current").struct.field("snowfall").alias("snowfall"),
-            pl.col("current").struct.field("rain").alias("rain"),
-            pl.col("current").struct.field("showers").alias("showers"),
-            pl.col("current").struct.field("snow_depth").alias("snow_depth"),
-            pl.col("current").struct.field("visibility").alias("visibility"),
-        ]
-    )
-
-    # Convert time column to datetime
-    df = df.with_columns([pl.col("time").str.strptime(pl.Datetime, "%Y-%m-%dT%H:%M")])
-
-    # Write to S3 as a single Parquet file
-    output_lake_path = staged_path / "current_weather_table.parquet"
+    # Load back to S3 as a single Parquet file
+    output_lake_path = staged_path / "actual_weather_table.parquet"
     df.write_parquet(output_lake_path.uri)
 
     # Prepare metadata
-    columns = [
-        dg.TableColumn(name=col, type=str(dtype)) for (col, dtype) in df.schema.items()
-    ]
+    columns = [dg.TableColumn(name=col, type=str(dtype)) for (col, dtype) in df.schema.items()]
 
     return dg.MaterializeResult(
         metadata={
-            "uri": dg.MetadataValue.url(output_lake_path.uri),
             "column_schema": dg.TableSchema(columns=columns),
             "row_count": MetadataValue.int(df.height),
         }
     )
-
-
-@dg.schedule(cron_schedule="0 6 * * *", target=[raw_hourly_forecast])
-def daily_hourly_forecast_schedule(context: dg.ScheduleEvaluationContext):
-    """Schedule to run the hourly forecast asset daily at 6 AM UTC."""
-    start_date = context.scheduled_execution_time.date().strftime("%Y-%m-%d")
-    end_date = daily_partition.get_last_partition_key()
-
-    assert end_date is not None, "End date for daily partitioning should not be None"
-
-    # Generate run requests for each date from the current scheduled execution date to the last available partition date.
-    date_range = daily_partition.get_partition_keys_in_range(
-        dg.PartitionKeyRange(start=start_date, end=end_date)
-    )
-
-    for date, city_code in itertools.product(
-        date_range, city_partition.get_partition_keys()
-    ):
-        yield dg.RunRequest(
-            run_key=f"hourly_forecast_{city_code}_{date}",
-            partition_key=dg.MultiPartitionKey({"date": date, "city": city_code}),
-        )

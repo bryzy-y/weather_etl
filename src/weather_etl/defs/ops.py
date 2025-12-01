@@ -19,11 +19,9 @@ class DiscordWebhook(dg.Config):
 def hourly_forecast_to_discord(
     context: OpExecutionContext,
     config: DiscordWebhook,
-) -> dict:
-    """Send hourly weather forecast to a Discord channel via webhook.
-
-    Returns:
-        dict: Response from Discord webhook
+) -> None:
+    """
+    Send hourly weather forecast to a Discord channel via webhook.
     """
     city_code = "PHIL"
     forecast_date = date.today()
@@ -38,18 +36,13 @@ def hourly_forecast_to_discord(
     df = pl.read_parquet(table_path.uri)
 
     # Filter for specific city and date
-    df = df.filter(
-        (pl.col("city_code") == city_code) & (pl.col("time").dt.date() == forecast_date)
-    ).sort("time")
+    df = df.filter((pl.col("city_code") == city_code) & (pl.col("time").dt.date() == forecast_date)).sort("time")
 
     if df.height == 0:
-        context.log.warning(
-            f"No forecast data found for {city.name} on {forecast_date}"
-        )
-        return {"status": "no_data", "city": city.name, "date": str(forecast_date)}
+        context.log.warning(f"No forecast data found for {city.name} on {forecast_date}")
+        return
 
     # Extract hourly data
-    times = df["time"].to_list()
     temps = df["temperature_2m"].to_list()
     precip = df["precipitation"].to_list()
     wind = df["windspeed_10m"].to_list()
@@ -69,12 +62,8 @@ def hourly_forecast_to_discord(
     forecast_lines.append(f"{'Time':<8} {'Temp':<8} {'Rain':<8} {'Wind':<8}")
     forecast_lines.append("-" * 40)
 
-    for i in range(0, len(times), 3):  # Show every 3 hours to keep message concise
-        time_str = (
-            times[i].strftime("%H:%M")
-            if hasattr(times[i], "strftime")
-            else str(times[i])[-5:]
-        )
+    for i in range(len(times)):  # Show every hour
+        time_str = times[i].strftime("%H:%M") if hasattr(times[i], "strftime") else str(times[i])[-5:]
         temp = f"{temps[i]:.1f}°C" if i < len(temps) else "N/A"
         rain = f"{precip[i]:.1f}mm" if i < len(precip) else "N/A"
         wind_speed = f"{wind[i]:.1f}km/h" if i < len(wind) else "N/A"
@@ -91,22 +80,9 @@ def hourly_forecast_to_discord(
 
     context.log.info("Successfully sent forecast to Discord")
 
-    return {
-        "status": "success",
-        "city": city.name,
-        "date": str(forecast_date),
-        "hours_forecast": len(times),
-    }
-
 
 @dg.job(
-    config=dg.RunConfig(
-        ops={
-            "hourly_forecast_to_discord": DiscordWebhook(
-                url=dg.EnvVar("DISCORD_WEBHOOK_URL")
-            )
-        }
-    )
+    config=dg.RunConfig(ops={"hourly_forecast_to_discord": DiscordWebhook(url=dg.EnvVar("DISCORD_WEBHOOK_URL"))})
 )
 def hourly_forecast_to_discord_job() -> None:
     """Send a message to a Discord channel via webhook."""

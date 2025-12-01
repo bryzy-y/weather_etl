@@ -1,3 +1,5 @@
+"""Module defining models for the weather ETL pipeline."""
+
 from datetime import date
 from enum import StrEnum
 from typing import Self
@@ -5,23 +7,29 @@ from typing import Self
 from pydantic import BaseModel, model_validator
 
 API_URL = "https://api.open-meteo.com/v1"
+HISTORICAL_API_URL = "https://historical-forecast-api.open-meteo.com/v1"
+ARCHIVE_API_URL = "https://archive-api.open-meteo.com/v1"
 
 
 class City(BaseModel):
+    """Represents a city with its name and geographical coordinates."""
+
     name: str
     latitude: float
     longitude: float
 
 
 CITIES = {
-    "NYC": City(name="New York City", latitude=40.7128, longitude=-74.0060),
-    "PHIL": City(name="Philadelphia", latitude=39.9526, longitude=-75.1652),
-    "CHI": City(name="Chicago", latitude=41.8781, longitude=-87.6298),
-    "DC": City(name="Washington DC", latitude=38.9072, longitude=-77.0369),
+    "NYC": City(name="New York City", latitude=40.710335, longitude=-73.99309),
+    "PHIL": City(name="Philadelphia", latitude=39.96187, longitude=-75.15539),
+    "CHI": City(name="Chicago", latitude=41.879482, longitude=-87.64975),
+    "DC": City(name="Washington DC", latitude=38.916836, longitude=-77.019516),
 }
 
 
 class WeatherVars(StrEnum):
+    """Enumeration of weather variables available from the API."""
+
     TEMPERATURE_2M = "temperature_2m"
     PRECIPITATION = "precipitation"
     WINDSPEED_10M = "windspeed_10m"
@@ -37,7 +45,9 @@ class WeatherVars(StrEnum):
 
 
 class ForecastParams(BaseModel):
-    city: City
+    """Parameters for querying the weather forecast API."""
+
+    cities: list[City]
     start_date: date | None = None
     end_date: date | None = None
     temperature_unit: str = "celsius"
@@ -50,15 +60,14 @@ class ForecastParams(BaseModel):
     @model_validator(mode="after")
     def check_hourly_or_current(self) -> Self:
         if not self.hourly and not self.current:
-            raise ValueError(
-                "At least one of 'hourly' or 'current' must be provided."
-            )
+            raise ValueError("At least one of 'hourly' or 'current' must be provided.")
         return self
 
     def to_query_params(self) -> dict[str, str]:
+        """Convert the forecast parameters to a dictionary suitable for API query parameters."""
         params: dict[str, str] = {
-            "latitude": str(self.city.latitude),
-            "longitude": str(self.city.longitude),
+            "latitude": ",".join(str(city.latitude) for city in self.cities),
+            "longitude": ",".join(str(city.longitude) for city in self.cities),
             "temperature_unit": self.temperature_unit,
             "windspeed_unit": self.windspeed_unit,
             "precipitation_unit": self.precipitation_unit,

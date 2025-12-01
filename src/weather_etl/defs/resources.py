@@ -1,3 +1,5 @@
+"""Module defining resources for the weather ETL pipeline."""
+
 from contextlib import contextmanager
 from datetime import date
 
@@ -6,7 +8,14 @@ import httpx
 from dagster_aws.s3 import S3Resource
 from pydantic import PrivateAttr
 
-from weather_etl.models import API_URL, City, ForecastParams, WeatherVars
+from weather_etl.models import (
+    API_URL,
+    ARCHIVE_API_URL,
+    HISTORICAL_API_URL,
+    City,
+    ForecastParams,
+    WeatherVars,
+)
 
 
 class WeatherApiClient(dg.ConfigurableResource):
@@ -28,11 +37,17 @@ class WeatherApiClient(dg.ConfigurableResource):
         finally:
             self._client.close()
 
-    def hourly_forecast(self, city: City, start_date: date, end_date: date) -> dict:
+    def hourly_forecast(self, cities: list[City]) -> list[dict]:
+        """
+        Fetch hourly weather forecast data for specified cities.
+        Args:
+            cities (list[City]): A list of City objects for which to retrieve the hourly forecast.
+        Returns:
+            list[dict]: A list of dictionaries containing the hourly forecast data in JSON format.
+        """
+
         params = ForecastParams(
-            city=city,
-            start_date=start_date,
-            end_date=end_date,
+            cities=cities,
             hourly=WeatherVars.default(),
         )
 
@@ -40,10 +55,49 @@ class WeatherApiClient(dg.ConfigurableResource):
         response.raise_for_status()
         return response.json()
 
-    def current_weather(self, city: City) -> dict:
-        params = ForecastParams(city=city, current=WeatherVars.default())
+    def historical_forecast(self, cities: list[City], start_date: date, end_date: date) -> list[dict]:
+        """
+        Fetch historical weather forecast data from the historical API.
+        Args:
+            cities (list[City]): A list of City objects for which to retrieve the historical forecast.
+            start_date (date): The start date for the historical data range.
+            end_date (date): The end date for the historical data range.
+        Returns:
+            list[dict]: A list of dictionaries containing the historical forecast data in JSON format.
+        """
 
-        response = self._client.get("forecast", params=params.to_query_params())
+        params = ForecastParams(
+            cities=cities,
+            start_date=start_date,
+            end_date=end_date,
+            hourly=WeatherVars.default(),
+        )
+
+        response = self._client.get(HISTORICAL_API_URL + "/forecast", params=params.to_query_params())
+
+        response.raise_for_status()
+        return response.json()
+
+    def actual_weather(self, cities: list[City], start_date: date, end_date: date) -> list[dict]:
+        """
+        Fetch actual weather data from the archive API.
+        Args:
+            cities (list[City]): A list of City objects for which to retrieve the actual weather data.
+            start_date (date): The start date for the actual weather data range.
+            end_date (date): The end date for the actual weather data range.
+        Returns:
+            list[dict]: A list of dictionaries containing the actual weather data in JSON format.
+        """
+
+        params = ForecastParams(
+            cities=cities,
+            start_date=start_date,
+            end_date=end_date,
+            hourly=WeatherVars.default(),
+        )
+
+        response = self._client.get(ARCHIVE_API_URL + "/archive", params=params.to_query_params())
+
         response.raise_for_status()
         return response.json()
 
