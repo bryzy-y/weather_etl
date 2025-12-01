@@ -151,7 +151,7 @@ def actual_weather_path(date: date | None) -> LakePath:
     """
     Get the LakePath for actual weather data for a given date.
     Args:
-        date | None: Date of the actual weather data
+        date (date or None): Date of the actual weather data
     """
     path = raw_path / "dataset=actual_weather"
     return path / f"date={date.strftime('%Y-%m-%d')}" if date else path

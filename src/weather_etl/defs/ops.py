@@ -40,9 +40,9 @@ def hourly_forecast_to_discord(
 
     if df.height == 0:
         context.log.warning(f"No forecast data found for {city.name} on {forecast_date}")
+        return
 
     # Extract hourly data
-    times = df["time"].to_list()
     temps = df["temperature_2m"].to_list()
     precip = df["precipitation"].to_list()
     wind = df["windspeed_10m"].to_list()
