@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from pathlib import PurePosixPath
 from typing import Self
 
@@ -132,3 +133,27 @@ class LakePath:
 
 raw_path = LakePath("dagster-weather-etl", "raw")
 staged_path = LakePath("dagster-weather-etl", "staged")
+
+
+def forecast_path(date: date | None) -> LakePath:
+    """Get the LakePath for historical forecast data for a given date.
+
+    Args:
+        date_str: Date string in 'YYYYMMDD' format
+    Returns:
+        LakePath for the historical forecast data
+    """
+    path = raw_path / "dataset=hourly_forecast"
+    return path / f"date={date.strftime('%Y-%m-%d')}" if date else path
+
+
+def actual_weather_path(date: date | None) -> LakePath:
+    """Get the LakePath for actual weather data for a given date.
+
+    Args:
+        date: Date of
+    Returns:
+        LakePath for the actual weather data
+    """
+    path = raw_path / "dataset=actual_weather"
+    return path / f"date={date.strftime('%Y-%m-%d')}" if date else path

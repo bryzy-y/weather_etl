@@ -19,11 +19,9 @@ class DiscordWebhook(dg.Config):
 def hourly_forecast_to_discord(
     context: OpExecutionContext,
     config: DiscordWebhook,
-) -> dict:
-    """Send hourly weather forecast to a Discord channel via webhook.
-
-    Returns:
-        dict: Response from Discord webhook
+) -> None:
+    """
+    Send hourly weather forecast to a Discord channel via webhook.
     """
     city_code = "PHIL"
     forecast_date = date.today()
@@ -46,7 +44,6 @@ def hourly_forecast_to_discord(
         context.log.warning(
             f"No forecast data found for {city.name} on {forecast_date}"
         )
-        return {"status": "no_data", "city": city.name, "date": str(forecast_date)}
 
     # Extract hourly data
     times = df["time"].to_list()
@@ -69,7 +66,7 @@ def hourly_forecast_to_discord(
     forecast_lines.append(f"{'Time':<8} {'Temp':<8} {'Rain':<8} {'Wind':<8}")
     forecast_lines.append("-" * 40)
 
-    for i in range(0, len(times), 3):  # Show every 3 hours to keep message concise
+    for i in range(len(times)):  # Show every hour
         time_str = (
             times[i].strftime("%H:%M")
             if hasattr(times[i], "strftime")
@@ -90,13 +87,6 @@ def hourly_forecast_to_discord(
         response.raise_for_status()
 
     context.log.info("Successfully sent forecast to Discord")
-
-    return {
-        "status": "success",
-        "city": city.name,
-        "date": str(forecast_date),
-        "hours_forecast": len(times),
-    }
 
 
 @dg.job(
